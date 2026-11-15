@@ -27,8 +27,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 #include <inttypes.h>
+
+#ifndef _MSC_VER
+#include <unistd.h>
+#else
+#include <windows.h>
+#define sleep(n) Sleep(n * 1000)
+#endif
+
 #include <curl/curl.h>
 #include <plist/plist.h>
 
@@ -37,9 +44,9 @@
 
 #define USER_AGENT_STRING "InetURL/1.0"
 
-#define AUTH_VERSION "973.40.2"
+#define AUTH_VERSION "1104.0.9"
 
-#ifdef WIN32
+#ifdef _WIN32
 #define TSS_CLIENT_VERSION_STRING "libauthinstall_Win-"AUTH_VERSION"" 
 #else
 #define TSS_CLIENT_VERSION_STRING "libauthinstall-"AUTH_VERSION""
@@ -112,7 +119,7 @@ plist_t tss_request_new(plist_t overrides)
 	plist_t request = plist_new_dict();
 
 	plist_dict_set_item(request, "@HostPlatformInfo",
-#ifdef WIN32
+#ifdef _WIN32
 		plist_new_string("windows")
 #else
 		plist_new_string("mac")
@@ -188,7 +195,15 @@ int tss_parameters_add_from_manifest(plist_t parameters, plist_t build_identity,
 		return -1;
 	}
 
+	plist_dict_copy_uint(parameters, build_identity, "Ap,OSEnvironment", NULL);
 	plist_dict_copy_string(parameters, build_identity, "Ap,OSLongVersion", NULL);
+	plist_dict_copy_string(parameters, build_identity, "Ap,OSReleaseType", NULL);
+	plist_dict_copy_string(parameters, build_identity, "Ap,ProductMarketingVersion", NULL);
+	plist_dict_copy_string(parameters, build_identity, "Ap,ProductType", NULL);
+	plist_dict_copy_string(parameters, build_identity, "Ap,SDKPlatform", NULL);
+	plist_dict_copy_string(parameters, build_identity, "Ap,Target", NULL);
+	plist_dict_copy_string(parameters, build_identity, "Ap,TargetType", NULL);
+	plist_dict_copy_string(parameters, build_identity, "Ap,Timestamp", NULL);
 
 	if (plist_dict_copy_uint(parameters, build_identity, "ApChipID", NULL) < 0) {;
 		error("ERROR: Unable to find ApChipID node\n");
@@ -264,6 +279,10 @@ int tss_parameters_add_from_manifest(plist_t parameters, plist_t build_identity,
 
 	plist_dict_copy_uint(parameters, build_identity, "NeRDEpoch", NULL);
 	plist_dict_copy_data(parameters, build_identity, "PearlCertificationRootPub", NULL);
+	plist_dict_copy_bool(parameters, build_identity, "AllowNeRDBoot", NULL);
+	if (plist_dict_get_item(parameters, "NeRDEpoch")) {
+		plist_dict_set_item(parameters, "PermitNeRDPivot", plist_new_data(NULL, 0));
+	}
 
 	plist_dict_copy_uint(parameters, build_identity, "Timer,BoardID,1", NULL);
 	plist_dict_copy_uint(parameters, build_identity, "Timer,BoardID,2", NULL);
@@ -320,7 +339,15 @@ int tss_request_add_ap_img4_tags(plist_t request, plist_t parameters)
 		return -1;
 	}
 
+	plist_dict_copy_uint(request, parameters, "Ap,OSEnvironment", NULL);
 	plist_dict_copy_string(request, parameters, "Ap,OSLongVersion", NULL);
+	plist_dict_copy_string(request, parameters, "Ap,OSReleaseType", NULL);
+	plist_dict_copy_string(request, parameters, "Ap,ProductMarketingVersion", NULL);
+	plist_dict_copy_string(request, parameters, "Ap,ProductType", NULL);
+	plist_dict_copy_string(request, parameters, "Ap,SDKPlatform", NULL);
+	plist_dict_copy_string(request, parameters, "Ap,Target", NULL);
+	plist_dict_copy_string(request, parameters, "Ap,TargetType", NULL);
+	plist_dict_copy_string(request, parameters, "Ap,Timestamp", NULL);
 
 	if (plist_dict_copy_data(request, parameters, "ApNonce", NULL) < 0) {
 		error("ERROR: Unable to find required ApNonce in parameters\n");
@@ -344,9 +371,11 @@ int tss_request_add_ap_img4_tags(plist_t request, plist_t parameters)
 		}
 	}
 
-	plist_dict_copy_data(request, parameters, "SepNonce", "ApSepNonce");
+	plist_dict_copy_data(request, parameters, "SepNonce", plist_dict_get_item(parameters, "SepNonce") ? NULL : "ApSepNonce");
 	plist_dict_copy_uint(request, parameters, "NeRDEpoch", NULL);
 	plist_dict_copy_data(request, parameters, "PearlCertificationRootPub", NULL);
+	plist_dict_copy_bool(request, parameters, "AllowNeRDBoot", NULL);
+	plist_dict_copy_item(request, parameters, "PermitNeRDPivot", NULL);
 
 	if (plist_dict_get_item(parameters, "UID_MODE")) {
 		plist_dict_copy_item(request, parameters, "UID_MODE", NULL);
@@ -720,6 +749,10 @@ int tss_request_add_ap_tags(plist_t request, plist_t parameters, plist_t overrid
 
 		/* FIXME: only used with diagnostics firmware */
 		if (strcmp(key, "Diags") == 0) {
+			continue;
+		}
+
+		if (strcmp(key, "Ap,ExclaveOS") == 0) {
 			continue;
 		}
 
@@ -1102,7 +1135,7 @@ int tss_request_add_yonkers_tags(plist_t request, plist_t parameters, plist_t ov
 			node = NULL;
 			break;
 		}
-		if (strncmp(comp_name, "Yonkers,", 8) == 0) {
+		if (strncmp(comp_name, "Yonkers,SysTopPatch", 19) == 0) {
 			int target_node = 1;
 			plist_t sub_node;
 			if ((sub_node = plist_dict_get_item(node, "EPRO")) != NULL && plist_get_node_type(sub_node) == PLIST_BOOLEAN) {
@@ -1344,6 +1377,139 @@ int tss_request_add_veridian_tags(plist_t request, plist_t parameters, plist_t o
 	return 0;
 }
 
+int tss_request_add_bora_tags(plist_t request, plist_t parameters, plist_t overrides)
+{
+	plist_t node = NULL;
+
+	plist_t manifest_node = plist_dict_get_item(parameters, "Manifest");
+	if (!manifest_node || plist_get_node_type(manifest_node) != PLIST_DICT) {
+		error("ERROR: %s: Unable to get restore manifest from parameters\n", __func__);
+		return -1;
+	}
+
+	/* add tags indicating we want to get the AVISP1,Ticket */
+	plist_dict_set_item(request, "@BBTicket", plist_new_bool(1));
+	plist_dict_set_item(request, "@AVISP1,Ticket", plist_new_bool(1));
+
+	plist_dict_copy_uint(request, parameters, "AVISP1,BoardID", NULL);
+	plist_dict_copy_uint(request, parameters, "AVISP1,ChipID", NULL);
+	plist_dict_copy_uint(request, parameters, "AVISP1,ECID", NULL);
+	plist_dict_copy_data(request, parameters, "AVISP1,Nonce", NULL);
+	plist_dict_copy_bool(request, parameters, "AVISP1,ProductionMode", NULL);
+	plist_dict_copy_uint(request, parameters, "AVISP1,SecurityDomain", NULL);
+	plist_dict_copy_bool(request, parameters, "AVISP1,SecurityMode", NULL);
+	plist_dict_copy_data(request, parameters, "AVISP1,FdrRootCaDigest", NULL);
+
+	char *comp_name = NULL;
+	plist_dict_iter iter = NULL;
+	plist_dict_new_iter(manifest_node, &iter);
+	while (iter) {
+		node = NULL;
+		comp_name = NULL;
+		plist_dict_next_item(manifest_node, iter, &comp_name, &node);
+		if (comp_name == NULL) {
+			node = NULL;
+			break;
+		}
+		if (strncmp(comp_name, "AVISP1,", 7) == 0) {
+			plist_t manifest_entry = plist_copy(node);
+
+			/* handle RestoreRequestRules */
+			plist_t rules = plist_access_path(manifest_entry, 2, "Info", "RestoreRequestRules");
+			if (rules) {
+				debug("DEBUG: Applying restore request rules for entry %s\n", comp_name);
+				tss_entry_apply_restore_request_rules(manifest_entry, parameters, rules);
+			}
+
+			/* Make sure we have a Digest key for Trusted items even if empty */
+			if (plist_dict_get_bool(manifest_entry, "Trusted") && !plist_dict_get_item(manifest_entry, "Digest")) {
+				debug("DEBUG: No Digest data, using empty value for entry %s\n", comp_name);
+				plist_dict_set_item(manifest_entry, "Digest", plist_new_data(NULL, 0));
+			}
+
+			plist_dict_remove_item(manifest_entry, "Info");
+
+			/* finally add entry to request */
+			plist_dict_set_item(request, comp_name, manifest_entry);
+		}
+		free(comp_name);
+	}
+	free(iter);
+
+	/* apply overrides */
+	if (overrides) {
+		plist_dict_merge(&request, overrides);
+	}
+
+	return 0;
+}
+
+int tss_request_add_durant_tags(plist_t request, plist_t parameters, plist_t overrides)
+{
+	plist_t node = NULL;
+
+	plist_t manifest_node = plist_dict_get_item(parameters, "Manifest");
+	if (!manifest_node || plist_get_node_type(manifest_node) != PLIST_DICT) {
+		error("ERROR: %s: Unable to get restore manifest from parameters\n", __func__);
+		return -1;
+	}
+
+	/* add tags indicating we want to get the AudioAP1,Ticket */
+	plist_dict_set_item(request, "@BBTicket", plist_new_bool(1));
+	plist_dict_set_item(request, "@AudioAP1,Ticket", plist_new_bool(1));
+
+	plist_dict_copy_uint(request, parameters, "AudioAP1,BoardID", NULL);
+	plist_dict_copy_uint(request, parameters, "AudioAP1,ChipID", NULL);
+	plist_dict_copy_uint(request, parameters, "AudioAP1,ECID", NULL);
+	plist_dict_copy_data(request, parameters, "AudioAP1,Nonce", NULL);
+	plist_dict_copy_bool(request, parameters, "AudioAP1,ProductionMode", NULL);
+	plist_dict_copy_uint(request, parameters, "AudioAP1,SecurityDomain", NULL);
+	plist_dict_copy_bool(request, parameters, "AudioAP1,SecurityMode", NULL);
+
+	char *comp_name = NULL;
+	plist_dict_iter iter = NULL;
+	plist_dict_new_iter(manifest_node, &iter);
+	while (iter) {
+		node = NULL;
+		comp_name = NULL;
+		plist_dict_next_item(manifest_node, iter, &comp_name, &node);
+		if (comp_name == NULL) {
+			node = NULL;
+			break;
+		}
+		if (strncmp(comp_name, "AudioAP1,", 9) == 0) {
+			plist_t manifest_entry = plist_copy(node);
+
+			/* handle RestoreRequestRules */
+			plist_t rules = plist_access_path(manifest_entry, 2, "Info", "RestoreRequestRules");
+			if (rules) {
+				debug("DEBUG: Applying restore request rules for entry %s\n", comp_name);
+				tss_entry_apply_restore_request_rules(manifest_entry, parameters, rules);
+			}
+
+			/* Make sure we have a Digest key for Trusted items even if empty */
+			if (plist_dict_get_bool(manifest_entry, "Trusted") && !plist_dict_get_item(manifest_entry, "Digest")) {
+				debug("DEBUG: No Digest data, using empty value for entry %s\n", comp_name);
+				plist_dict_set_item(manifest_entry, "Digest", plist_new_data(NULL, 0));
+			}
+
+			plist_dict_remove_item(manifest_entry, "Info");
+
+			/* finally add entry to request */
+			plist_dict_set_item(request, comp_name, manifest_entry);
+		}
+		free(comp_name);
+	}
+	free(iter);
+
+	/* apply overrides */
+	if (overrides) {
+		plist_dict_merge(&request, overrides);
+	}
+
+	return 0;
+}
+
 int tss_request_add_tcon_tags(plist_t request, plist_t parameters, plist_t overrides)
 {
 	plist_t node = NULL;
@@ -1420,31 +1586,31 @@ int tss_request_add_timer_tags(plist_t request, plist_t parameters, plist_t over
 		return -1;
 	}
 	char key[64];
-	sprintf(key, "@%s", plist_get_string_ptr(node, NULL));
+	snprintf(key, sizeof(key), "@%s", plist_get_string_ptr(node, NULL));
 
 	plist_dict_set_item(request, key, plist_new_bool(1));
 
 	tag = (uint32_t)plist_dict_get_uint(parameters, "TagNumber");
 
-	sprintf(key, "Timer,BoardID,%u", tag);
+	snprintf(key, sizeof(key), "Timer,BoardID,%u", tag);
 	plist_dict_copy_uint(request, parameters, key, NULL);
 
-	sprintf(key, "Timer,ChipID,%u", tag);
+	snprintf(key, sizeof(key), "Timer,ChipID,%u", tag);
 	plist_dict_copy_uint(request, parameters, key, NULL);
 
-	sprintf(key, "Timer,SecurityDomain,%u", tag);
+	snprintf(key, sizeof(key), "Timer,SecurityDomain,%u", tag);
 	plist_dict_copy_uint(request, parameters, key, NULL);
 
-	sprintf(key, "Timer,SecurityMode,%u", tag);
+	snprintf(key, sizeof(key), "Timer,SecurityMode,%u", tag);
 	plist_dict_copy_bool(request, parameters, key, NULL);
 
-	sprintf(key, "Timer,ProductionMode,%u", tag);
+	snprintf(key, sizeof(key), "Timer,ProductionMode,%u", tag);
 	plist_dict_copy_bool(request, parameters, key, NULL);
 
-	sprintf(key, "Timer,ECID,%u", tag);
+	snprintf(key, sizeof(key), "Timer,ECID,%u", tag);
 	plist_dict_copy_uint(request, parameters, key, NULL);
 
-	sprintf(key, "Timer,Nonce,%u", tag);
+	snprintf(key, sizeof(key), "Timer,Nonce,%u", tag);
 	plist_dict_copy_data(request, parameters, key, NULL);
 
 	char *comp_name = NULL;
@@ -1533,7 +1699,12 @@ static size_t tss_write_callback(char* data, size_t size, size_t nmemb, tss_resp
 {
 	size_t total = size * nmemb;
 	if (total != 0) {
-		response->content = realloc(response->content, response->length + total + 1);
+		char* new_content = realloc(response->content, response->length + total + 1);
+		if (!new_content) {
+			/* keep the data received so far; returning a short count makes curl abort the transfer */
+			return 0;
+		}
+		response->content = new_content;
 		memcpy(response->content + response->length, data, total);
 		response->content[response->length + total] = '\0';
 		response->length += total;

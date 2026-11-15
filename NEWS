@@ -1,3 +1,38 @@
+Version 1.1.1
+~~~~~~~~~~~~~
+
+Changes:
+- Copy Ap,OSEnvironment from the build identity into AP requests (cloudOS)
+
+
+Version 1.1.0
+~~~~~~~~~~~~~
+
+Changes:
+- Add tss_request_add_bora_tags() and tss_request_add_durant_tags() to the API
+- Update auth client version and add Ap,Timestamp to requests
+- Restrict Yonkers tag selection to SysTopPatch
+
+Fixes:
+- Handle realloc() failure in tss_write_callback()
+
+
+Version 1.0.5
+~~~~~~~~~~~~~
+
+Changes:
+- Fix compilation on MSVC
+- Add extern "C" guards to public headers
+- Update auth client version
+
+
+Version 1.0.4
+~~~~~~~~~~~~~
+
+Changes:
+- Updated for iPhone 16 device family
+
+
 Version 1.0.3
 ~~~~~~~~~~~~~
 
